@@ -1,0 +1,89 @@
+# ---------------------------------------------------------------------------------
+# Takes in two feature classes with the same schema and checks every row for differences
+# or new rows. The output is a list of rows from either input in the form of CSV.
+# The output will include the different or new rows from both inputs with a column
+# that specifies the feature class name and the object ID. Currenrly it only runs if
+# both feature classes have the same number of columns.
+#
+# (C) 2024 Merielle Redwine, Hurricane, UT
+# email merielle@cityofhurricane.com
+# linkedin https://www.linkedin.com/in/merielle-redwine-a4a937ab/
+# ---------------------------------------------------------------------------------
+
+import arcpy
+import os
+import pandas as pd
+
+# Set the workspace environment
+arcpy.env.workspace = r"path"  # Change to your geodatabase path
+
+# Input feature classes
+input1 = arcpy.GetParameter(0)
+input2 = arcpy.GetParameter(1)
+
+# Output feature class
+outputPath = arcpy.GetParameter(2)
+
+# list fields in the feature class as objects
+fields1 = arcpy.ListFields(input1)
+fields2 = arcpy.ListFields(input2)
+
+# extract names from field objects and create sorted field lists with OID first
+listFields1 = []
+for field in fields1:
+    if field.name != 'globalid' and field.name != 'objectid':
+        listFields1.append(field.name)
+listFields1.sort()
+listFields1.insert(0, 'objectid')
+
+listFields2 = []
+for field in fields2:
+    if field.name != 'globalid' and field.name != 'objectid':
+        listFields2.append(field.name)
+listFields2.sort()
+listFields2.insert(0, 'objectid')
+
+# create list of fields for the output table using field names from input1 and a layer field
+fieldnames = list(listFields1) + ["Layer"]
+
+# Output table
+outputDf = []
+columns = fieldnames
+
+# Process input1 records
+with arcpy.da.SearchCursor(input1, listFields1) as cursor1:
+    for row1 in cursor1:
+        # Check if the attributes match in input2
+        matching_attributes = False
+        with arcpy.da.SearchCursor(input2, listFields2) as cursor2:
+            for row2 in cursor2:                               
+                if row1[1:] == row2[1:]:  # Compare attributes excluding objectid
+                    matching_attributes = True
+                    break
+            if not matching_attributes:
+                # Write a new record to the CSV using the object ID and attributes from input1
+                outputDf.append(list(row1) + [input1.name])
+# Process input2 records
+with arcpy.da.SearchCursor(input2, listFields2) as cursor2:
+    for row2 in cursor2:
+        # Check if the attributes match in input2
+        matching_attributes = False
+        with arcpy.da.SearchCursor(input1, listFields2) as cursor1:
+            for row2 in cursor2:
+                if row1[1:] == row2[1:]:  # Compare attributes excluding objectid
+                    matching_attributes = True
+                    break
+            if not matching_attributes:
+                # Write a new record to the CSV using the object ID and attributes from input1
+                outputDf.append(list(row2) + [input2.name])
+
+# Convert output table to pandas dataframe
+finalDf = pd.DataFrame(outputDf, columns=columns)
+
+# create CSV file and delete if already exists
+output_csv = str(outputPath) + ".csv"
+if os.path.exists(output_csv):
+    os.remove(output_csv)
+
+# output CSV
+finalDf.to_csv(output_csv)
