@@ -1,9 +1,8 @@
 # ---------------------------------------------------------------------------------
 # Takes in two feature classes with the same schema and checks every row for differences
-# or new rows. The output is a list of rows from either input in the form of CSV.
-# The output will include the different or new rows from the first input with a column
-# that specifies the feature class name and the object ID. Currenrly it only runs if
-# both feature classes have the same number of columns.
+# or new rows. The output is a CSV file of rows from the first input plus a column that 
+# specifies the feature class name. Currently it only runs if both feature classes have 
+# the same number of columns.
 #
 # (C) 2024 Merielle Redwine, Hurricane, UT
 # email merielle@cityofhurricane.com
