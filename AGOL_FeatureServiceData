@@ -1,0 +1,121 @@
+# ---------------------------------------------------------------------------------
+# Searches feature services and webmaps in ArcGIS Online portal. Returns an excel
+# file of feature services and their title, id, type, created date, modified date, 
+# url, webmaps that contain the layer, how many webmaps contain it, and whether its 
+# empty or not.
+#
+# (C) 2024 Merielle Redwine, Hurricane, UT
+# email merielle@cityofhurricane.com
+# linkedin https://www.linkedin.com/in/merielle-redwine-a4a937ab/
+# ---------------------------------------------------------------------------------
+
+from arcgis.gis import GIS
+from arcgis.mapping import WebMap
+from arcgis.features import FeatureLayer
+import arcpy
+import pandas as pd
+import numpy as np
+
+# takes in excel file path
+outputXL = arcpy.GetParameter(0)
+
+# save variable as active portal
+gis = GIS('pro')
+
+# create table of feature services
+services = (gis.content.search(query="", item_type="Feature Service", max_items=10000))
+servicesTable = [
+    {
+        'Title': service.title,
+        'ID': service.id,
+        'Type': service.type,
+        'Owner': service.owner,
+        'Created': service.created,
+        'Modified': service.modified,
+        'URL': service.url,
+        # Add more fields as needed
+    }
+    for service in services
+]
+
+# convert table to pandas df with service title as index
+servicesDF = pd.DataFrame(servicesTable)
+servicesDF.set_index('Title', inplace=True)
+
+# create three empty lists
+count = np.zeros(len(services)).tolist()
+webmaps = [None]*len(services)
+empty = [None]*len(services)
+
+# create three new columns in the df and fill with empty lists
+servicesDF['Count'] = count
+servicesDF['Webmaps'] = webmaps
+servicesDF['Layer One isEmpty'] = empty
+
+def main():
+    # prints active portal of the ArcGIS Pro Project this script is run from
+    arcpy.AddMessage("Logged into {} as {}".format(arcpy.GetActivePortalURL(), gis.properties['user']['username']))
+    # inputs services to web map search function
+    wm_search(services)
+
+# returns Web Map title and url where the input service matches a layer
+def wm_search(services):
+    arcpy.AddMessage('Searching' + ' webmaps in ' + arcpy.GetActivePortalURL())
+    web_maps = gis.content.search(query="", item_type="Web Map", max_items=10000)    
+    for item in web_maps:
+        web_map = WebMap(item)
+        arcpy.AddMessage(f"searching webmap: {item.title}")
+        # iterates through layers in each webmap
+        layers = web_map.layers
+        for layer in layers:
+            try:
+                # checks if feature services match layers in the webmap
+                for service in services:
+                    # first checks sublayers within webmap
+                    if layer.layerType == "GroupLayer":
+                        for sublayer in layer.layers:
+                            if service.url.lower() in sublayer.url.lower():
+                                servicesDF.loc[service.title, 'Count'] +=1
+                                # saves webmap title in Webmap column
+                                if servicesDF.loc[service.title, 'Webmaps'] is None:   
+                                    servicesDF.loc[service.title, 'Webmaps'] = [item.title] # if first webmap checked with the service
+                                else:
+                                    servicesDF.loc[service.title, 'Webmaps'].append(item.title) # if service is in other webmaps, adds to list of webmaps
+                    # checks regular feature layers in webmap
+                    elif service.url.lower() in layer.url.lower():
+                        arcpy.AddMessage(f"yes, {service.url} is in {layer.url}")
+                        servicesDF.loc[service.title, 'Count'] +=1
+                        if servicesDF.loc[service.title, 'Webmaps'] is None:
+                            servicesDF.loc[service.title, 'Webmaps'] = [item.title] # if first webmap checked with the service
+                        else:
+                            servicesDF.loc[service.title, 'Webmaps'].append(item.title) # if service is in other webmaps, adds to list of webmaps
+            except:
+                continue
+
+    arcpy.AddMessage('Search Complete')
+
+# returns a boolean for if the feature service is empty or not
+# or returns "not hosted" if the feature service is from another host, and therefore cannot be searched
+def is_feature_layer_empty(services):
+    # Query the feature layer to check if it has any features
+    for service in services:
+        if ('https://services3.arcgis.com' in service.url):
+            if (service.layers is not None):
+                layerUrl = service.layers[0]
+                # counts if the service layer has at least one feature
+                count = layerUrl.query(where="1=1", return_count_only=True)
+                countBool = (count == 0) # returns false if it has any features
+            else:   
+                countBool = True 
+        else:
+            countBool = "not hosted"
+        servicesDF.loc[service.title, 'Layer One isEmpty'] = countBool
+
+if __name__ == '__main__':
+    main()
+
+is_feature_layer_empty(services)
+
+# converts dataframe to excel file
+servicesDF.to_excel("outputXL")
+
