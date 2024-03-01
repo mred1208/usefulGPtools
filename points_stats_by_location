@@ -1,0 +1,86 @@
+# --------------------------------------------------------------------------------------------
+# Takes in two feature layers: a polygon layer called layer1poly and a points layer2points. First, an 
+# empty pandas dataframe is created called table1. Next, the name fields from the layer1poly 
+# are extracted by iterating though the rows with a cursor and saved to a list called list1. 
+# These elements in the list are used as indices for table1. Table1 also has two more fields 
+# called count and sum. Next, two more empty lists are created: countList and sumList. Then, 
+# using another cursor, iterate through each of the records in the polygon layer, and for each 
+# record, select by location. The parameters for select by location are input features: layer1poly 
+# and relationship: within. After applying the selection, statistics are completed and two values 
+# from the statistics are saved as variables: count and sum. Count is appended to countList, and 
+# sum is appended to sumList. Finally, countList is used to populate the column count in table1, 
+# and sumList is used to populate the column sum in table1. Note that you have to hard code into 
+# the SearchCursor for the stats output the name given to the script because its stored in memory.
+#
+# (C) 2024 Merielle Redwine, Hurricane, UT
+# email merielle@cityofhurricane.com
+# linkedin https://www.linkedin.com/in/merielle-redwine-a4a937ab/
+#
+# --------------------------------------------------------------------------------------------
+
+import os
+import arcpy
+import pandas as pd
+
+layer1poly = arcpy.GetParameter(0)
+layer2points = arcpy.GetParameter(1)
+
+# Output feature class
+outputPath = arcpy.GetParameter(2)
+
+# Create an empty pandas dataframe called table1
+table1 = pd.DataFrame(columns=['Name', 'count', 'sum'])
+
+# Extract the name fields from layer1poly and save to list1
+list1 = []
+with arcpy.da.SearchCursor(layer1poly, ['Name']) as cursor:
+    for row in cursor:
+        list1.append(row[0])
+
+# Use list1 as indices for table1
+table1['Name'] = list1
+
+def points_stats_by_location(layer1poly, layer2points):
+    # Create empty lists for count and sum
+    countList = []
+    sumList = []
+
+    # Iterate through each record in the polygon layer
+    with arcpy.da.SearchCursor(layer1poly, ['SHAPE@', 'Name']) as cursor:
+        for row in cursor:
+            # Select points within the current polygon using Select By Location
+            arcpy.SelectLayerByLocation_management(layer2points, 'WITHIN', row[0])
+            
+            # Use summary statistics to calculate count and sum
+            stats = arcpy.analysis.Statistics(layer2points, 'in_memory/stats_output', [['quantityNum','COUNT'], ['quantityNum','SUM']])
+
+            fieldsStats = arcpy.ListFields(stats)
+            for fields in fieldsStats:
+                arcpy.AddMessage(fields.name)
+
+            # temporary in memory stats output: hard coded "points_stats_by_location" 
+            with arcpy.da.SearchCursor(stats, ['COUNT_points_stats_by_location_quantityNum', 'SUM_points_stats_by_location_quantityNum']) as stat_cursor:
+                for stat_row in stat_cursor:
+                    count = stat_row[0]
+                    sum_value = stat_row[1]
+
+            # Append count and sum to their respective lists
+            countList.append(count)
+            sumList.append(sum_value)
+
+            # Clear the selection for the next iteration
+            arcpy.SelectLayerByAttribute_management(layer2points, 'CLEAR_SELECTION')
+        # Populate count and sum columns in table1
+        table1['count'] = countList
+        table1['sum'] = sumList
+        arcpy.AddMessage(table1)        
+    return table1
+
+# run the function
+points_stats_by_location(layer1poly, layer2points)
+
+# add csv extention, delete if already exists, and output the csv
+output_csv = str(outputPath) + ".csv"
+if os.path.exists(output_csv):
+    os.remove(output_csv)
+table1.to_csv(output_csv)
