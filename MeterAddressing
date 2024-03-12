@@ -1,0 +1,68 @@
+import os
+import arcpy
+import pandas as pd
+
+# Ultimately this script saves addresses from a parcel layer into a water meter layer based on viscinity. It
+# takes in two feature layers (first is a meter layer and second is ownerParcel) and iterates through the meter layer,
+# performing a select by location where record(s) in the parcel layer are selected within a distance of the meter layer
+# Change the address and distance variables based on preference. The address from the parcel layer is saved and updates
+# the address field in the meter layer if conditions are met. If multiple records from the parcel layer are selected,
+# 'check parcels' is updated in the address field of the meter layer instead. If no parcels are selected, the address
+# field stays null.
+
+# user input 
+Meters = arcpy.GetParameter(0)
+ownerParcel = arcpy.GetParameter(1)
+
+##################################################################
+#### change these variables based on needs.#######################
+##################################################################
+
+# replace in update cursor function
+piAddressField = 'svcaddress'
+culAddressField = 'address'
+
+# search_distance parameter of Select Layer By Location function
+oneFt = '0.0001894 Miles'
+onePtFiveFt = '0.0002841 Miles'
+twoFt = '0.0003788 Miles'
+threeFt = '0.0005682 Miles'
+
+###################################################################
+###################################################################
+
+# lists fields in each layer just to check on address field name
+fieldsParcels = arcpy.ListFields(ownerParcel)
+for field in fieldsParcels:
+    arcpy.AddMessage(f"parcel= {field.name}")
+fieldsMeters = arcpy.ListFields(Meters)
+for field in fieldsMeters:
+    arcpy.AddMessage(f"Meter= {field.name}")
+
+# Create a cursor for meter layer (change field name of meter address field if needed)
+with arcpy.da.UpdateCursor(Meters, ['SHAPE@', piAddressField, 'objectid']) as update_cursor:
+    for update_row in update_cursor:
+        # Select ownerParcel features that are within the current Meter (change distance parameter)
+        arcpy.SelectLayerByLocation_management(ownerParcel, 'WITHIN_A_DISTANCE_GEODESIC', update_row[0], search_distance=oneFt)
+        # check how many parcels are selected
+        output = int(arcpy.GetCount_management(ownerParcel).getOutput(0))
+
+        # update addresses if meter is near one parcel, otherwise set to None
+        # sets to None
+        if output == 0:
+            update_row[1] = None
+            update_cursor.updateRow(update_row)
+        elif output == 1:
+            # Update the selected Meters features with the address from ownerParcel
+            with arcpy.da.SearchCursor(ownerParcel, 'address') as search_cursor:        
+                for search_row in search_cursor:
+                    address = search_row[0] # get address from current parcel record
+                    update_row[1] = address
+                    update_cursor.updateRow(update_row)
+        # checks for multiple parcels being selected
+        elif output > 1:
+            update_row[1] = 'check parcels'
+            update_cursor.updateRow(update_row)                    
+
+        # Clear the selection for the next iteration
+        arcpy.SelectLayerByAttribute_management(ownerParcel, 'CLEAR_SELECTION')
