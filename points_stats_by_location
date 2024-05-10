@@ -12,7 +12,6 @@
 # and sumList is used to populate the column sum in table1. Note that you have to hard code into 
 # the SearchCursor for the stats output the name given to the script because its stored in memory.
 #
-# (C) 2024 Merielle Redwine, Hurricane, UT
 # email merielle@cityofhurricane.com
 # linkedin https://www.linkedin.com/in/merielle-redwine-a4a937ab/
 #
