@@ -4,7 +4,6 @@
 # specifies the feature class name. Currently it only runs if both feature classes have 
 # the same number of columns.
 #
-# (C) 2024 Merielle Redwine, Hurricane, UT
 # email merielle@cityofhurricane.com
 # linkedin https://www.linkedin.com/in/merielle-redwine-a4a937ab/
 # ---------------------------------------------------------------------------------
