@@ -1,0 +1,109 @@
+########################################################################################################
+# Merielle Redwine - GIS Analyst I City of Hurricane, Utah
+# 2024
+#
+# This script populates a Word template with field collected data and saves forms to a local folder.
+# A folder is created for each year, month, and day based on the field: installdate. The script
+# queries the AGOL feature layer, wMeters, based on install dates within the last seven days. It
+# overwrites duplicate forms. 
+#
+########################################################################################################
+#
+# IMPORTS
+import os
+from arcgis.features import FeatureLayer    
+from datetime import datetime, timedelta, time
+from docx import Document
+from arcgis.gis import GIS
+from redmail import outlook
+#
+# LOGIN TO ESRI AND EXTRACT LAYERS
+gis = GIS("home") # login into AGOL
+service = gis.content.get("e5b5667ee12f4eb6b005aa107f52bcdb") # get feature service
+layer = service.layers[0] # access the feature layer from the service 
+data_fields_property_map = layer.properties.fields  # Access fields
+for f in data_fields_property_map:
+    arcpy.AddMessage(f['name']) # prints list of fields
+#
+# FUNCTIONS
+# Creates output path based on installdate year, month, and day and returns the final directory
+def create_output_path(formatted_install_date, year_install_date, month_install_date, day_install_date):
+    wMeter_dir = 'F:\Water Meter Changeout Forms' # initial directory
+    output_dir = os.path.join(wMeter_dir, year_install_date, month_install_date, day_install_date)
+    return output_dir
+#
+# converts datetime from unix format to YYYY-MM-DD
+def unix_time_conversion(unix_time_ms):
+    unix_time_sec = unix_time_ms / 1000 # divide by 1000
+    date_time = datetime.utcfromtimestamp(unix_time_sec) # convert to utc timestamp
+    formatted_time = date_time.strftime('%Y-%m-%d') # format the utc timestamp
+    return formatted_time
+#
+# Queries the feature layer based on the past 7 days of installdate
+def query_install_date():
+    # Get the current date and time
+    current_date = datetime.now().date()
+    current_datetime = datetime.now() 
+    zero_time = time(0, 0, 0) # 12:00:00 AM
+    formatted_today = current_datetime.strftime("%Y-%m-%d %H:%M:%S PM") # format current datetime
+    past_week_date = current_date - timedelta(days=7) # the date 7 days prior 
+    past_week_zero = datetime.combine(past_week_date, zero_time) # combines 7 days prior date and 12:00:00 AM
+    formatted_past_week_zero = past_week_zero.strftime("%Y-%m-%d %H:%M:%S AM") # format 7 days prior datetime
+    # query for install date between 7 days ago and current datetime
+    past_week_query = f"installdate >= '{formatted_past_week_zero}' and installdate <='{formatted_today}' and jobtype = 'changeout'"
+    past_week_features = layer.query(where=past_week_query) # query the features
+    return past_week_features, past_week_query
+#
+# populates a Word template defined by a path and saves the file in specified directory
+def populate_word_template(output_dir, field_values, formatted_install_date):
+    WORD_TEMPLATE_PATH = 'R:\Merielle\WATER METER CHANGE OUT FORM - Copy.docx' # path to template
+    doc = Document(WORD_TEMPLATE_PATH) # saves template as a variable
+    # iterates through lines in template and replaces the template key words with the data field values
+    for paragraph in doc.paragraphs:
+        # iterates though list items in the tuple storing the data fields and template key words
+        for template_field, data_field in fields_tuple: 
+            if template_field in paragraph.text: # if template word found, replace with field values
+                paragraph.text = paragraph.text.replace(template_field, str(field_values[data_field]))        
+    output_filename = f"{field_values['caselle_address']}_{formatted_install_date}.docx" # names output file
+    output_path = os.path.join(output_dir, output_filename) # creates output path with directory and file name
+    if not os.path.exists(output_dir): # if the path exists, create directories and save docs
+        os.makedirs(output_dir)
+    doc.save(output_path)
+    arcpy.AddMessage(f"Document saved at: {output_path}")
+#
+#
+#
+#
+#
+# FINAL SCRIPT
+# list of fields from data to include in the docs
+data_fields = [
+    'caselle_address', 'meterid','newmeterid', 'accountnumber', 'model', 'partreplaced',
+    'endread', 'startread', 'inventoryretire', 'installdate'
+    ]
+# list of key words found in the template
+template_fields = ['caselle_address', 'old_meter_id','new_meter_id', 'account_num','model_num',
+                   'part_replaced', 'end_read','start_read', 'inventory_retire', 'date_time'
+                   ]
+fields_tuple = tuple(zip(template_fields, data_fields)) # combine data and template lists into tuple
+arcpy.AddMessage(fields_tuple)
+results, query = query_install_date() # save the queried features and the query as variables
+arcpy.AddMessage(f"queried for dates {query}")
+# iterates through each feature in the query and populates the template with data
+for feature in results: 
+    attributes = feature.attributes # gets attributes from features
+    field_values = {item: attributes[item] for item in data_fields} # saves template values as keys for a dictionary with data fields
+    # setup to run date conversion
+    key_to_update = 'installdate' 
+    if key_to_update in field_values: # date conversion
+        field_values[key_to_update] = unix_time_conversion(field_values[key_to_update])
+    formatted_install_date = field_values[key_to_update] # saves updated date as variable
+    year_install_date = formatted_install_date.split('-')[0] 
+    month_install_date =  formatted_install_date.split('-')[1]
+    day_install_date =  formatted_install_date.split('-')[2]
+    # create output directory path from year, month, and day
+    output_dir = create_output_path(formatted_install_date, year_install_date, month_install_date, day_install_date)
+    arcpy.AddMessage(field_values)
+    arcpy.AddMessage(f'output path {output_dir}')
+    # populate the word template and save doc in the output directory
+    populate_word_template(output_dir, field_values, formatted_install_date)
