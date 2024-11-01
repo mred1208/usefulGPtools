@@ -1,0 +1,148 @@
+# ---------------------------------------------------------------------------------
+# scans Web Maps in Portal, checks each feature service, creates CSV for all services
+# and lists web maps for each service and counts. All services with count 0 are
+# added to a list. This list of services is added to the group 'Mark Deprecated'
+# and then all content in that group is marked deprecated
+# runs over the currently active portal in ArcGIS Pro
+#
+# ---------------------------------------------------------------------------------
+from arcgis.gis import GIS
+from arcgis.mapping import WebMap
+from arcgis.features import FeatureLayer
+import arcpy
+import pandas as pd
+import numpy as np
+# sign into the active portal of the ArcGIS Pro Project this script is run from
+gis = GIS('pro')
+services = (gis.content.search(query="", item_type="Feature Service", max_items=10000))
+servicesTable = [
+    {
+        'Title': service.title,
+        'ID': service.id,
+        'Type': service.type,
+        'Owner': service.owner,
+        'Created': service.created,
+        'Modified': service.modified,
+        'URL': service.url,
+        # Add more fields as needed
+    }
+    for service in services
+]
+servicesDF = pd.DataFrame(servicesTable)
+servicesDF.set_index('Title', inplace=True)
+count = np.zeros(len(services)).tolist()
+servicesDF['Count'] = count
+webmaps = [None]*len(services)
+servicesDF['Webmaps'] = webmaps
+empty = [None]*len(services)
+servicesDF['Layer One isEmpty'] = empty
+def main():
+    # signs into the active portal of the ArcGIS Pro Project this script is run from
+    arcpy.AddMessage("Logged into {} as {}".format(arcpy.GetActivePortalURL(), gis.properties['user']['username']))
+    # inputs services to web map search function
+    wm_search(services)
+# returns Web Map title and url where the input service matches a layer
+def wm_search(services):
+    arcpy.AddMessage('Searching' + ' webmaps in ' + arcpy.GetActivePortalURL())
+    web_maps = gis.content.search(query="", item_type="Web Map", max_items=10000)    
+    for item in web_maps:
+        web_map = WebMap(item)
+        arcpy.AddMessage(f"searching webmap: {item.title}")
+        layers = web_map.layers
+        for layer in layers:
+            try:                
+                for service in services:
+                    if layer.layerType == "GroupLayer":
+                        for sublayer in layer.layers:
+                            if service.url.lower() in sublayer.url.lower():
+                                arcpy.AddMessage(f"yes, group layer URL, {service.url}, is in sublayer URL {sublayer.url}")
+                                #servicesDF.loc[service.title, 'Count'] +=1
+                                if servicesDF.loc[service.title, 'Webmaps'] is None:
+                                    servicesDF.loc[service.title, 'Webmaps'] = [item.title]
+                                elif item.title in servicesDF.loc[service.title, 'Webmaps']:
+                                    arcpy.AddMessage(f'the webmap {item.title} is already in the list')
+                                else:                                      
+                                    servicesDF.loc[service.title, 'Webmaps'].append(item.title)
+                    elif service.url.lower() in layer.url.lower():
+                        #servicesDF.loc[service.title, 'Count'] +=1
+                        if servicesDF.loc[service.title, 'Webmaps'] is None:
+                            servicesDF.loc[service.title, 'Webmaps'] = [item.title]
+                            arcpy.AddMessage("first webmap added to list")
+                        elif item.title in servicesDF.loc[service.title, 'Webmaps']:
+                            arcpy.AddMessage(f'the webmap {item.title} is already in the list')
+                        else:
+                            servicesDF.loc[service.title, 'Webmaps'].append(item.title)
+                            arcpy.AddMessage("webmap appended to list")
+            except:
+                continue
+    arcpy.AddMessage('Search Complete')
+def is_feature_layer_empty(services):
+    # Query the feature layer to check if it has any features
+    for service in services:
+        if service.layers is not None:
+            arcpy.AddMessage('not empty service')
+            servicesDF.loc[service.title, 'Layer One isEmpty'] = 'no'
+        #arcpy.AddMessage(f"the service: {service} has layers {service.layers}")
+##        if ('https://imapshcu.org' in service.url):
+##            if (service.layers is not None):
+##                layerUrl = service.layers[0]
+##                count = layerUrl.query(where="1=1", return_count_only=True)
+##                countBool = (count == 0)
+##                arcpy.AddMessage(f'{layerURL} has {countBool} webmaps')
+##            else:   
+##                countBool = True
+        else:
+            servicesDF.loc[service.title, 'Layer One isEmpty'] = 'yes'
+        #servicesDF.loc[service.title, 'Layer One isEmpty'] = countBool
+if __name__ == '__main__':
+    main()
+is_feature_layer_empty(services)
+webmapCounts = servicesDF.apply(lambda row: len(row['Webmaps']) if row['Webmaps'] is not None else 0, axis=1)
+servicesDF['Count'] = webmapCounts
+arcpy.AddMessage(servicesDF)
+listofemptyServices = []
+servicesDF.apply(lambda row: listofemptyServices.append(row['ID']) if row['Count'] is 0 else None, axis=1)
+arcpy.AddMessage(f"list of empty services: {listofemptyServices}")
+# Group ID where you want to add the feature services
+group_name = "Mark Deprecated"
+groupsearch = gis.groups.search(group_name)
+delete_group = groupsearch[0]
+if not delete_group:
+    arcpy.AddMessage(f"No group found with the name '{delete_group}'.")
+else:
+    arcpy.AddMessage(f'group found {delete_group}')
+# Loop through each feature service ID and add it to the group
+    for fs_id in listofemptyServices:
+        feature_service_item = gis.content.get(fs_id)
+        if feature_service_item:
+            feature_service_item.share(groups=[delete_group])
+            arcpy.AddMessage(f"Added {feature_service_item.title} to the group.")
+        else:
+            arcpy.AddMessage(f"Feature service with ID {fs_id} not found.")
+    # Search for items in the "Delete Items" group
+    items = delete_group.content()
+    if not items:
+        arcpy.AddMessage("No items found in the 'Delete Items' group.")
+    else:
+        arcpy.AddMessage(f"Found {len(items)} items in the '{group_name}' group.")
+        # Mark all items as deprecated
+        for item in items:
+            item.content_status = 'deprecated'
+            contentStatus = item.content_status              
+            arcpy.AddMessage(f"content status: {contentStatus}")
+arcpy.AddMessage("All items processed.")
+
+
+servicesDF.to_excel("R:\Merielle\PortalContentPython.xlsx")
+    
+               
+               #     if layer['layerType'] == "VectorTileLayer":
+                #        if service.url.lower() in layer.styleUrl.lower():
+                 #           arcpy.AddMessage(f"yes, vector tile {service.title} is in yes {item.title}")
+                  #          servicesDF.loc[service.title, 'Count'] +=1
+                #            if servicesDF.loc[service.title, 'Webmaps'] is None:
+                #                servicesDF.loc[service.title, 'Webmaps'] = [item.title]
+                #            else:
+                #                servicesDF.loc[service.title, 'Webmaps'].append(item.title)
+                #        else:
+                #            servicesDF.loc[service.title, 'Count'] = servicesDF.loc[service.title, 'Count']
